@@ -17,7 +17,7 @@ class Config(object):
     # Your bot name - Required (str)
     BOT_NAME = "AK Downloaer Pro Bot"
     # A name for users - Required (str)
-    BOT_NAME_FOR_USERS = "AKDownloaderProBot" #name in database
+    BOT_NAME_FOR_USERS = "UniversalVideosDownloadBot" #name in database
     # List of administrator IDs
     ADMIN = [8980576385]
     # Add allowed group IDs - Only these groups will be served by the bot
@@ -33,7 +33,7 @@ class Config(object):
     # Bot token
     BOT_TOKEN = "8904435779:AAG-dbKJnJ4bhcmBXWnx6XsaXY7ehU6-VQg"
     # Mini-app URL
-    MINIAPP_URL = "http://t.me/AKDownloaderProBot/?startapp"
+    MINIAPP_URL = "http://t.me/UniversalVideosDownloadBot/?startapp"
     # Channel ID for logs (you can use the same 1 channel ID for all LOGS)
     LOGS_ID = -1004401290975  # Channel ID for logs
     LOGS_VIDEO_ID = -1004401290975  # Channel ID for video logs
@@ -47,9 +47,9 @@ class Config(object):
     SUBSCRIBE_CHANNEL_URL = ""
     # Branding / UI text overrides (optional).
     # These values are used by translations via placeholders.
-    REQUIRED_CHANNEL_MENTION = "@AKDownloaderProBot"
+    REQUIRED_CHANNEL_MENTION = "@UniversalVideosDownloadBot"
     CREDITS_MANAGED_BY = "\n@Anujedits76"
-    CREDITS_BOTS = "@AKDownloaderProBot\n@Anujedits76"
+    CREDITS_BOTS = "@UniversalVideosDownloadBot\n@Anujedits76"
     # Session string пользователя для чтения admin logs канала (опционально)
     # Боты не могут читать admin logs, поэтому нужна пользовательская сессия
     # Для генерации session string запустите: python generate_session_string.py

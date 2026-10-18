@@ -19,7 +19,7 @@ class Config(object):
     # A name for users - Required (str)
     BOT_NAME_FOR_USERS = "AKDownloaderProBot" #name in database
     # List of administrator IDs
-    ADMIN = [8729304171]
+    ADMIN = [8980576385]
     # Add allowed group IDs - Only these groups will be served by the bot
     ALLOWED_GROUP = []
     # Groups whose admins may use admin commands in the group (empty = none)
@@ -31,7 +31,7 @@ class Config(object):
     # API HASH Telegram
     API_HASH = "5d897bed11bc8b062a12f6c1c3c5360a"
     # Bot token
-    BOT_TOKEN = "8842343584:AAEfuPC3ZDcJG21NQaJ7qsrL0zKZO1yzQZE"
+    BOT_TOKEN = "8904435779:AAG-dbKJnJ4bhcmBXWnx6XsaXY7ehU6-VQg"
     # Mini-app URL
     MINIAPP_URL = "http://t.me/AKDownloaderProBot/?startapp"
     # Channel ID for logs (you can use the same 1 channel ID for all LOGS)

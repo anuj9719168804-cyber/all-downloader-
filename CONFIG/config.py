@@ -35,12 +35,12 @@ class Config(object):
     # Mini-app URL
     MINIAPP_URL = "http://t.me/UniversalVideosDownloadBot/?startapp"
     # Channel ID for logs (you can use the same 1 channel ID for all LOGS)
-    LOGS_ID = -1004401290975  # Channel ID for logs
-    LOGS_VIDEO_ID = -1004401290975  # Channel ID for video logs
-    LOGS_NSFW_ID = -1004401290975  # Channel ID for video logs with NSWF tags
-    LOGS_IMG_ID = -1004401290975  # Channel ID for media command logs /img 
-    LOGS_PAID_ID = -1004401290975  # Channel ID for paid media logs
-    LOG_EXCEPTION = -1004401290975  # Channel ID for exception logs
+    LOGS_ID = -1004457510571  # Channel ID for logs
+    LOGS_VIDEO_ID = -1004457510571  # Channel ID for video logs
+    LOGS_NSFW_ID = -1004457510571  # Channel ID for video logs with NSWF tags
+    LOGS_IMG_ID = -1004457510571  # Channel ID for media command logs /img 
+    LOGS_PAID_ID = -1004457510571  # Channel ID for paid media logs
+    LOG_EXCEPTION = -1004457510571  # Channel ID for exception logs
     # Channel ID to subscribe to
     SUBSCRIBE_CHANNEL = -1004457510571
     # Add subscription channel - Required (str)

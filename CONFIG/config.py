@@ -33,7 +33,7 @@ class Config(object):
     # API HASH Telegram
     API_HASH = "5d897bed11bc8b062a12f6c1c3c5360a"
     # Bot token
-    BOT_TOKEN = "8904435779:AAHtEKOdlRkZzn9UQZWXOvaXb9j-C9pMEJ0"
+    BOT_TOKEN = "8904435779:AAE15zLSVaq9L9vsA10NkXvgMZpEc9EhDZE"
     # Mini-app URL
     MINIAPP_URL = "http://t.me/UniversalVideosDownloadBot/?startapp"
     # Channel ID for logs (you can use the same 1 channel ID for all LOGS)

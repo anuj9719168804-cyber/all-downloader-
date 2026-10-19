@@ -15,7 +15,7 @@ class Config(object):
     # IMPORTANT (REQUIRED) SETTINGS - start filling settings here
     #######################################################        
     # Your bot name - Required (str)
-    BOT_NAME = "AK Downloaer Pro Bot"
+    BOT_NAME = "Universal Video Downloader"
     # A name for users - Required (str)
     BOT_NAME_FOR_USERS = "UniversalVideosDownloadBot" #name in database
     # @username shown at the end of every caption ("🔗 Video URL ... @UniversalVideosDownloadBot"), without the @

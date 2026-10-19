@@ -1,7 +1,6 @@
 # Базовые зависимости (обычная установка)
-# pyrogram is outdated; switch to actively maintained PyroTGFork
-# kurigram>=2.2.26  (removed: no InputPaidMedia* classes)
-pyrofork
+# kurigram = Pyrogram fork with ButtonStyle (colored buttons, same as fbot). Do NOT add pyrofork/pyrogram next to it.
+kurigram>=2.2.26
 aiohttp
 aiofiles
 requests<3,>=2.8.1

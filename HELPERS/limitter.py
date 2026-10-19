@@ -1,0 +1,654 @@
+from HELPERS.app_instance import get_app
+from CONFIG.config import Config
+from CONFIG.messages import Messages, safe_get_messages
+from CONFIG.logger_msg import LoggerMsg
+from HELPERS.logger import logger, get_log_channel
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.enums import ChatMemberStatus
+from pyrogram.errors import UserNotParticipant
+import os
+from HELPERS.safe_messeger import safe_send_message
+from CONFIG.limits import LimitsConfig
+from pyrogram import enums
+from CONFIG.LANGUAGES.language_router import language_router
+
+def should_apply_limits_to_admin(user_id=None, message=None):
+    """
+    Проверяет, должны ли применяться ограничения к админу или группе из ADMIN_GROUP.
+    Возвращает True, если ограничения должны применяться, False если нет.
+    
+    Args:
+        user_id: ID пользователя или группы (опционально)
+        message: Объект сообщения (опционально, используется для получения user_id/chat_id)
+    
+    Returns:
+        bool: True если ограничения должны применяться, False если нет
+    """
+    chat_id = None
+    if user_id is None:
+        if message:
+            chat_id = message.chat.id if hasattr(message, 'chat') else None
+            user_id = chat_id
+        else:
+            return True  # Если нет информации о пользователе, применяем ограничения
+    else:
+        chat_id = user_id
+    
+    if chat_id is None:
+        return True
+    
+    chat_id_int = int(chat_id)
+    
+    # Проверяем, является ли чат группой из ADMIN_GROUP
+    admin_groups = getattr(Config, 'ADMIN_GROUP', [])
+    if admin_groups and chat_id_int in admin_groups:
+        # Для групп из ADMIN_GROUP проверяем настройку TURN_OFF_LIMITS_FOR_ADMINS
+        # Если True - не применяем ограничения, если False - применяем
+        return not LimitsConfig.TURN_OFF_LIMITS_FOR_ADMINS
+    
+    # Проверяем, является ли пользователь админом
+    is_admin = chat_id_int in Config.ADMIN
+    
+    if not is_admin:
+        return True  # Для не-админов всегда применяем ограничения
+    
+    # Для админов проверяем настройку TURN_OFF_LIMITS_FOR_ADMINS
+    # Если True - не применяем ограничения, если False - применяем
+    return not LimitsConfig.TURN_OFF_LIMITS_FOR_ADMINS
+
+def create_language_keyboard():
+    """
+    Create keyboard with language selection buttons (2 per row)
+    """
+    available_languages = language_router.get_available_languages()
+    keyboard = []
+    
+    # Create buttons in pairs (2 per row)
+    lang_items = list(available_languages.items())
+    for i in range(0, len(lang_items), 2):
+        row = []
+        # Add first button
+        lang_code, lang_name = lang_items[i]
+        row.append(InlineKeyboardButton(
+            text=lang_name,
+            callback_data=f'lang_select_{lang_code}'
+        ))
+        # Add second button if exists
+        if i + 1 < len(lang_items):
+            lang_code2, lang_name2 = lang_items[i + 1]
+            row.append(InlineKeyboardButton(
+                text=lang_name2,
+                callback_data=f'lang_select_{lang_code2}'
+            ))
+        keyboard.append(row)
+    
+    return InlineKeyboardMarkup(keyboard)
+
+def humanbytes(size):
+    # https://stackoverflow.com/a/49361727/4723940
+    # 2 ** 10 = 1024
+    if not size:
+        return ""
+    power = 2**10
+    n = 0
+    Dic_powerN = {0: ' ', 1: 'Ki', 2: 'Mi', 3: 'Gi', 4: 'Ti'}
+    while size > power:
+        size /= power
+        n += 1
+    return str(round(size, 2)) + " " + Dic_powerN[n] + 'B'
+
+def TimeFormatter(milliseconds: int) -> str:
+    seconds, milliseconds = divmod(int(milliseconds), 1000)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    days, hours = divmod(hours, 24)
+    tmp = ((str(days) + "d, ") if days else "") +\
+        ((str(hours) + "h, ") if hours else "") +\
+        ((str(minutes) + "m, ") if minutes else "") +\
+        ((str(seconds) + "s, ") if seconds else "") +\
+        ((str(milliseconds) + "ms, ") if milliseconds else "")
+    return tmp[:-2]
+
+# Check the USAGE of the BOT
+
+_VALID_MEMBER_STATUSES = (ChatMemberStatus.MEMBER, ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR)
+
+
+def _extract_pending_url(message):
+    """Extract the URL from a message for pending_url storage."""
+    try:
+        import re as _re
+        text = getattr(message, 'text', '') or getattr(message, 'caption', '') or ''
+        m = _re.search(r'https?://[^\s]+', text)
+        return m.group(0) if m else None
+    except Exception:
+        return None
+
+
+_subscribe_url_cache = None
+
+
+def get_subscribe_channel_url():
+    """Return the join link for the force-subscribe channel ('' if none can be found).
+
+    Order: SUBSCRIBE_CHANNEL_URL env var -> Config.SUBSCRIBE_CHANNEL_URL -> derived from the
+    channel itself: t.me/<username> for public channels, or an invite link for private ones
+    (the bot must be an admin with invite rights to create one). The result is cached.
+    """
+    global _subscribe_url_cache
+    explicit = (os.getenv("SUBSCRIBE_CHANNEL_URL") or getattr(Config, 'SUBSCRIBE_CHANNEL_URL', '') or '').strip()
+    if explicit:
+        return explicit
+    if _subscribe_url_cache:
+        return _subscribe_url_cache
+
+    channel = getattr(Config, 'SUBSCRIBE_CHANNEL', None)
+    app = get_app()
+    if not channel or app is None:
+        return ''
+    try:
+        chat = app.get_chat(channel)
+        username = getattr(chat, 'username', None)
+        if username:
+            link = f"https://t.me/{username}"
+        else:
+            link = getattr(chat, 'invite_link', None) or app.export_chat_invite_link(channel)
+        _subscribe_url_cache = link or ''
+        if not _subscribe_url_cache:
+            logger.warning("Force-subscribe: could not derive a join link for SUBSCRIBE_CHANNEL.")
+    except Exception as e:
+        logger.warning(f"Force-subscribe: could not derive join link from SUBSCRIBE_CHANNEL: {e}")
+        return ''
+    return _subscribe_url_cache
+
+
+def _send_subscribe_prompt(chat_id, pending_url=None):
+    """Send the subscription prompt: Join button + green-tick I've Joined button (no language keyboard)."""
+    # Save pending URL so check_sub callback can auto-process it after verification
+    if pending_url:
+        try:
+            import json as _json
+            _user_dir = os.path.join("users", str(chat_id))
+            os.makedirs(_user_dir, exist_ok=True)
+            _pf = os.path.join(_user_dir, "pending_url.json")
+            with open(_pf, "w") as _f:
+                _json.dump({"url": pending_url}, _f)
+        except Exception as _e:
+            logger.warning(f"Could not save pending_url for {chat_id}: {_e}")
+    _messages = safe_get_messages(chat_id)
+    text = f"{_messages.TO_USE_MSG}\n \n{_messages.CREDITS_MSG}"
+    # Fill branding placeholders used by the DL translations (see CONFIG/config.py)
+    text = (text
+            .replace("{required_channel}", str(getattr(Config, "REQUIRED_CHANNEL_MENTION", "") or ""))
+            .replace("{managed_by}", str(getattr(Config, "CREDITS_MANAGED_BY", "") or ""))
+            .replace("{credits_bots}", str(getattr(Config, "CREDITS_BOTS", "") or "")))
+
+    joined_button = InlineKeyboardButton(
+        getattr(_messages, 'CHANNEL_JOINED_CHECK_BUTTON_MSG', '✅ I\'ve Joined'),
+        callback_data="check_sub|verify"
+    )
+    # Step 1 of the flow: Join button, with the green-tick "I've Joined" button right below it.
+    # The language selection is shown only after the user taps the green-tick button
+    # and the membership check passes (see check_sub_callback in COMMANDS/other_handlers.py).
+    _channel_url = get_subscribe_channel_url()
+    keyboard_buttons = []
+    if _channel_url:
+        keyboard_buttons.append([InlineKeyboardButton(_messages.CHANNEL_JOIN_BUTTON_MSG, url=_channel_url)])
+    keyboard_buttons.append([joined_button])
+
+    safe_send_message(
+        chat_id=chat_id,
+        text=text,
+        reply_markup=InlineKeyboardMarkup(keyboard_buttons),
+    )
+
+
+def is_user_allowed(message):
+    """ALLOWED_USERS whitelist for private chats.
+    Empty list = disabled (everyone allowed). Admins always pass.
+    Groups are unaffected (private chats only)."""
+    allowed_users = getattr(Config, 'ALLOWED_USERS', [])
+    if not allowed_users:
+        return True
+    if getattr(message.chat, 'type', None) != enums.ChatType.PRIVATE:
+        return True
+    try:
+        user_id = int(getattr(message.chat, 'id', 0))
+    except Exception:
+        return True
+    if user_id in Config.ADMIN or user_id in allowed_users:
+        return True
+    logger.info(LoggerMsg.LIMITTER_USER_NOT_ALLOWED_LOG_MSG.format(user_id=user_id))
+    safe_send_message(user_id, safe_get_messages(user_id).ACCESS_DENIED_PRIVATE_MSG)
+    return False
+
+
+def persist_user_cookie(user_id):
+    """Keep a permanent backup of the user's cookie.txt and restore it if it disappears.
+
+    Several download/retry flows delete users/<id>/cookie.txt when YouTube rejects it once or twice.
+    users/<id>/cookie.keep is never touched by those flows: whenever cookie.txt is missing or
+    empty it is restored from there, and whenever cookie.txt is present the backup is refreshed.
+    """
+    try:
+        cookie_name = os.path.basename(getattr(Config, 'COOKIE_FILE_PATH', 'cookie.txt')) or 'cookie.txt'
+        user_dir = os.path.join("users", str(user_id))
+        if not os.path.isdir(user_dir):
+            return
+        cookie = os.path.join(user_dir, cookie_name)
+        keep = os.path.join(user_dir, "cookie.keep")
+        import shutil
+        if os.path.isfile(cookie) and os.path.getsize(cookie) > 0:
+            if (not os.path.exists(keep)) or os.path.getmtime(cookie) > os.path.getmtime(keep):
+                shutil.copyfile(cookie, keep)
+        elif os.path.isfile(keep) and os.path.getsize(keep) > 0:
+            shutil.copyfile(keep, cookie)
+            logger.info(f"Restored cookie.txt for user {user_id} from cookie.keep")
+    except Exception as e:
+        logger.warning(f"persist_user_cookie failed for {user_id}: {e}")
+
+
+def sync_admin_cookie_to_user(user_id):
+    """Share the admin's cookie.txt with every user (Config.SHARE_ADMIN_COOKIES, default on).
+
+    The newest users/<admin_id>/cookie.txt among Config.ADMIN is the master. It is copied into
+    users/<user_id>/cookie.txt when that user has no cookie yet, or when the admin's file is
+    newer than the user's copy (e.g. the admin uploaded fresh cookies).
+    """
+    try:
+        if not getattr(Config, 'SHARE_ADMIN_COOKIES', True):
+            return
+        uid = int(user_id)
+        admins = [int(a) for a in (getattr(Config, 'ADMIN', None) or [])]
+        if uid in admins:
+            return
+        cookie_name = os.path.basename(getattr(Config, 'COOKIE_FILE_PATH', 'cookie.txt')) or 'cookie.txt'
+        src, src_mtime = None, 0
+        for aid in admins:
+            path = os.path.join("users", str(aid), cookie_name)
+            if os.path.isfile(path) and os.path.getsize(path) > 0:
+                mtime = os.path.getmtime(path)
+                if mtime > src_mtime:
+                    src, src_mtime = path, mtime
+        if not src:
+            return
+        user_dir = os.path.join("users", str(uid))
+        dest = os.path.join(user_dir, cookie_name)
+        if os.path.exists(dest) and os.path.getmtime(dest) >= src_mtime:
+            return
+        os.makedirs(user_dir, exist_ok=True)
+        tmp = dest + ".sync"
+        import shutil
+        shutil.copyfile(src, tmp)
+        os.replace(tmp, dest)
+        logger.info(f"Shared admin cookie copied to user {uid}")
+    except Exception as e:
+        logger.warning(f"sync_admin_cookie_to_user failed for {user_id}: {e}")
+
+
+def is_user_in_channel(app, message):
+    persist_user_cookie(message.chat.id)
+    for _admin_id in (getattr(Config, 'ADMIN', None) or []):
+        persist_user_cookie(_admin_id)
+    sync_admin_cookie_to_user(message.chat.id)
+    _messages = safe_get_messages(message.chat.id)
+    # Bypass subscription checks for explicitly allowed groups and admin groups
+    try:
+        chat_id = int(getattr(message.chat, 'id', 0))
+        if chat_id in getattr(Config, 'ALLOWED_GROUP', []) or chat_id in getattr(Config, 'ADMIN_GROUP', []):
+            return True
+    except Exception:
+        pass
+    # ALLOWED_USERS whitelist check (private chats only)
+    if not is_user_allowed(message):
+        return False  # denial message already sent by is_user_allowed
+    # Subscription is optional: skip the check when SUBSCRIBE_CHANNEL is not configured
+    # (empty/0 = no channel gate; mirrors the ALLOWED_GROUP empty-list convention)
+    if not getattr(Config, 'SUBSCRIBE_CHANNEL', None):
+        return True
+    try:
+        logger.info(LoggerMsg.LIMITTER_CHANNEL_CHECK_MEMBERSHIP_LOG_MSG.format(
+            user_id=message.chat.id, channel=Config.SUBSCRIBE_CHANNEL))
+        cht_member = app.get_chat_member(Config.SUBSCRIBE_CHANNEL, message.chat.id)
+        logger.info(LoggerMsg.LIMITTER_CHANNEL_CHECK_STATUS_LOG_MSG.format(
+            user_id=message.chat.id, status=cht_member.status))
+
+        if cht_member.status in _VALID_MEMBER_STATUSES:
+            logger.info(LoggerMsg.LIMITTER_CHANNEL_CHECK_IS_MEMBER_LOG_MSG.format(user_id=message.chat.id))
+            return True
+
+        logger.info(LoggerMsg.LIMITTER_CHANNEL_CHECK_NOT_MEMBER_LOG_MSG.format(user_id=message.chat.id))
+        _send_subscribe_prompt(message.chat.id, pending_url=_extract_pending_url(message))
+        return False
+
+    except UserNotParticipant:
+        # Expected behavior: user is not a member of the channel. This is not an error.
+        logger.info(LoggerMsg.LIMITTER_CHANNEL_CHECK_NOT_MEMBER_LOG_MSG.format(user_id=message.chat.id))
+        _send_subscribe_prompt(message.chat.id, pending_url=_extract_pending_url(message))
+        return False
+
+    except Exception as e:
+        logger.error(LoggerMsg.LIMITTER_CHANNEL_CHECK_ERROR_LOG_MSG.format(
+            user_id=message.chat.id, error=e))
+        _send_subscribe_prompt(message.chat.id, pending_url=_extract_pending_url(message))
+        return False
+
+
+def check_user(message):
+    messages = safe_get_messages(message.chat.id)
+    """Check if user is in channel and create user directory"""
+    user_id_str = str(message.chat.id)
+    
+    # Create The User Folder Inside The "Users" Directory
+    user_dir = os.path.join("users", user_id_str)
+    if not os.path.exists(user_dir):
+        os.makedirs(user_dir, exist_ok=True)
+    
+    # Check if user is in channel (for non-admins), but always allow in allowed groups and admin groups
+    chat_id = int(message.chat.id)
+    if chat_id not in Config.ADMIN and chat_id not in getattr(Config, 'ALLOWED_GROUP', []) and chat_id not in getattr(Config, 'ADMIN_GROUP', []):
+        app = get_app()
+        if app is None:
+            logger.error(safe_get_messages(message.chat.id).HELPER_APP_INSTANCE_NONE_MSG)
+            return False
+        return is_user_in_channel(app, message)
+    return True
+
+
+def ensure_group_admin(app, message):
+    messages = safe_get_messages(getattr(message.chat, 'id', None))
+    """
+    For allowed groups and admin groups, ensure the bot has admin rights. If not, ask to grant admin.
+    Returns True if ok to proceed, False if should stop.
+    """
+    try:
+        chat = getattr(message, 'chat', None)
+        chat_id = int(getattr(chat, 'id', 0)) if chat else 0
+        if chat_id in getattr(Config, 'ALLOWED_GROUP', []) or chat_id in getattr(Config, 'ADMIN_GROUP', []):
+            try:
+                me = app.get_me()
+                member = app.get_chat_member(chat_id, me.id)
+                status = getattr(member, 'status', None)
+                if status not in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER):
+                    # Ask to grant admin. Reply in the same topic/thread when possible
+                    safe_send_message(chat_id, safe_get_messages(chat_id).HELPER_ADMIN_RIGHTS_REQUIRED_MSG, message=message)
+                    return False
+            except Exception:
+                # If check failed for any reason, be safe and request admin
+                safe_send_message(chat_id, safe_get_messages(chat_id).HELPER_ADMIN_RIGHTS_REQUIRED_MSG, message=message)
+                return False
+        return True
+    except Exception:
+        return True
+
+def check_file_size_limit(info_dict, max_size_bytes=None, message=None):
+    """
+    Checks if the size of the file is the global limit.
+    Returns True if the size is within the limit, otherwise false.
+    """
+    user_id = message.chat.id if message else None
+    messages = safe_get_messages(user_id)
+    
+    # Проверяем, должны ли применяться ограничения к админу
+    if not should_apply_limits_to_admin(user_id=user_id, message=message):
+        return True  # Для админов с отключенными ограничениями всегда разрешаем
+    
+    if max_size_bytes is None:
+        max_size_gb = getattr(Config, 'MAX_FILE_SIZE_GB', 8)  # GiB
+        # Apply group multiplier for groups/channels (но не для ADMIN_GROUP с отключенными ограничениями)
+        try:
+            if message and getattr(message.chat, 'type', None) != enums.ChatType.PRIVATE:
+                # Проверяем, должны ли применяться ограничения (для ADMIN_GROUP с отключенными ограничениями не применяем множитель)
+                if should_apply_limits_to_admin(user_id=user_id, message=message):
+                    mult = getattr(LimitsConfig, 'GROUP_MULTIPLIER', 1)
+                    max_size_gb = int(max_size_gb * mult)
+        except Exception:
+            pass
+        max_size_bytes = int(max_size_gb * 1024 ** 3)
+
+    # Check if info_dict is None
+    if info_dict is None:
+        logger.warning(safe_get_messages(user_id).HELPER_CHECK_FILE_SIZE_LIMIT_INFO_DICT_NONE_MSG)
+        return True
+
+    filesize = info_dict.get('filesize') or info_dict.get('filesize_approx')
+    if filesize is not None:
+        try:
+            filesize = float(filesize)
+            if filesize > 0:
+                size_bytes = int(filesize)
+            else:
+                size_bytes = None
+        except (TypeError, ValueError):
+            size_bytes = None
+    else:
+        size_bytes = None
+    
+    if size_bytes is None:
+        # Try to estimate by bitrate (kbit/s) and duration (s)
+        tbr = info_dict.get('tbr')
+        duration = info_dict.get('duration')
+        if tbr is not None and duration is not None:
+            try:
+                tbr = float(tbr)
+                duration = float(duration)
+                size_bytes = int(tbr * duration * 125)  # kbit/s -> bytes
+            except (TypeError, ValueError):
+                size_bytes = None
+        
+        if size_bytes is None:
+            # Very rough estimate by resolution and duration
+            width = info_dict.get('width')
+            height = info_dict.get('height')
+            duration = info_dict.get('duration')
+            if width is not None and height is not None and duration is not None:
+                try:
+                    width = int(width)
+                    height = int(height)
+                    duration = float(duration)
+                    size_bytes = int(width * height * duration * 0.07)
+                except (TypeError, ValueError):
+                    size_bytes = None
+    
+    if size_bytes is None:
+        # Could not estimate, allow download
+        return True
+
+    return size_bytes <= max_size_bytes
+
+    
+def check_subs_limits(info_dict, quality_key=None, message=None, user_id=None):
+    """
+    Checks restrictions for embedding subtitles
+    Returns True if subtitles can be built, false if limits are exceeded
+    
+    Args:
+        info_dict: Словарь с информацией о видео
+        quality_key: Ключ качества (опционально)
+        message: Объект сообщения (опционально, для определения user_id)
+        user_id: ID пользователя (опционально)
+    """
+    messages = safe_get_messages(user_id if user_id else (message.chat.id if message else None))
+    try:
+        # Check if info_dict is None
+        if info_dict is None:
+            logger.warning(safe_get_messages(None).HELPER_CHECK_SUBS_LIMITS_INFO_DICT_NONE_MSG)
+            return True
+        
+        # Проверяем, должны ли применяться ограничения к админу
+        if not should_apply_limits_to_admin(user_id=user_id, message=message):
+            return True  # Для админов с отключенными ограничениями всегда разрешаем
+        
+        # Check if MKV format is selected - skip limits for soft embedding
+        is_mkv = False
+        if user_id:
+            try:
+                from COMMANDS.format_cmd import get_user_mkv_preference
+                is_mkv = bool(get_user_mkv_preference(user_id))
+            except Exception:
+                pass
+        
+        # Also check if file is already MKV
+        if not is_mkv and message:
+            try:
+                # Check if we're processing an MKV file
+                from DOWN_AND_UP.always_ask_menu import get_filters
+                fstate = get_filters(user_id)
+                sel_ext = fstate.get("ext", "mp4")
+                is_mkv = (sel_ext == "mkv")
+            except Exception:
+                pass
+        
+        # Skip limits for MKV soft embedding (no CPU-intensive burning)
+        if is_mkv:
+            logger.info("MKV format detected - skipping subtitle limits for soft embedding")
+            return True
+            
+        # We get the parameters from the config
+        max_quality = Config.MAX_SUB_QUALITY
+        max_duration = Config.MAX_SUB_DURATION
+        max_size = Config.MAX_SUB_SIZE
+        # Note: в этом контексте нет безопасного доступа к message/chat,
+        # поэтому групповые множители не применяются.
+        
+        logger.info(safe_get_messages(None).HELPER_CHECK_SUBS_LIMITS_CHECKING_LIMITS_MSG.format(max_quality=max_quality, max_duration=max_duration, max_size=max_size))
+        logger.info(safe_get_messages(None).HELPER_CHECK_SUBS_LIMITS_INFO_DICT_KEYS_MSG.format(keys=list(info_dict.keys()) if info_dict else 'None'))
+        
+        # Check the duration
+        duration = info_dict.get('duration')
+        if duration is not None:
+            try:
+                duration = float(duration)
+                if duration > max_duration:
+                    logger.info(safe_get_messages(None).HELPER_SUBTITLE_EMBEDDING_SKIPPED_DURATION_MSG.format(duration=duration, max_duration=max_duration))
+                    return False
+            except (TypeError, ValueError):
+                pass
+        
+        # Check the file size (only if it is accurately known)
+        filesize = info_dict.get('filesize') or info_dict.get('filesize_approx')
+        if filesize is not None:
+            try:
+                filesize = float(filesize)
+                if filesize > 0:  # Check that the size is larger than 0
+                    size_mb = filesize / (1024 * 1024)  # Fixed: use division instead of integer division
+                    if size_mb > max_size:
+                        logger.info(safe_get_messages(None).HELPER_SUBTITLE_EMBEDDING_SKIPPED_SIZE_MSG.format(size_mb=size_mb, max_size=max_size))
+                        return False
+            except (TypeError, ValueError):
+                pass
+        
+        # Check quality (only if width and height are available)
+        width = info_dict.get('width')
+        height = info_dict.get('height')
+        if width is not None and height is not None:
+            try:
+                width = int(width)
+                height = int(height)
+                min_side = min(width, height)
+                if min_side > max_quality:
+                    logger.info(safe_get_messages(None).HELPER_SUBTITLE_EMBEDDING_SKIPPED_QUALITY_MSG.format(width=width, height=height, min_side=min_side, max_quality=max_quality))
+                    return False
+            except (TypeError, ValueError):
+                pass
+        
+        logger.info(LoggerMsg.LIMITTER_SUBTITLE_LIMITS_CHECK_PASSED_LOG_MSG.format(duration=duration, size=filesize, width=width, height=height))
+        return True
+    except Exception as e:
+        logger.error(LoggerMsg.LIMITTER_SUBTITLE_LIMITS_CHECK_ERROR_LOG_MSG.format(error=e))
+        return False
+
+def check_playlist_range_limits(url, video_start_with, video_end_with, app, message):
+    """
+    Checks the limits of the download range for playlists, Tiktok and Instagram.
+    For single videos, True always returns.
+    If the range exceeds the limit, it sends a warning and returns false.
+    """
+    user_id = message.chat.id if message else None
+    messages = safe_get_messages(user_id)
+    # If a single video (no range) - always true
+    if video_start_with == 1 and video_end_with == 1:
+        return True
+
+    # Проверяем, должны ли применяться ограничения к админу
+    if not should_apply_limits_to_admin(user_id=user_id, message=message):
+        return True  # Для админов с отключенными ограничениями всегда разрешаем
+
+    # Безопасная проверка доменов через urlparse
+    is_tiktok_url = False
+    is_instagram_url = False
+    try:
+        from urllib.parse import urlparse as _urlparse
+        parsed_url = _urlparse(str(url) if url else '')
+        url_hostname = (parsed_url.hostname or '').lower()
+        is_tiktok_url = (
+            url_hostname in ('tiktok.com', 'www.tiktok.com', 'vm.tiktok.com', 'vt.tiktok.com')
+            or url_hostname.endswith('.tiktok.com')
+        )
+        is_instagram_url = (
+            url_hostname in ('instagram.com', 'www.instagram.com', 'instagr.am', 'www.instagr.am')
+            or url_hostname.endswith('.instagram.com')
+            or url_hostname.endswith('.instagr.am')
+        )
+    except Exception:
+        pass
+    if is_tiktok_url:
+        max_count = Config.MAX_TIKTOK_COUNT
+        service = 'TikTok'
+    elif is_instagram_url:
+        max_count = Config.MAX_TIKTOK_COUNT
+        service = 'Instagram'
+    else:
+        max_count = Config.MAX_PLAYLIST_COUNT
+        service = 'playlist'
+    
+    # Apply group multiplier for groups/channels (но не для ADMIN_GROUP с отключенными ограничениями)
+    try:
+        if message and getattr(message.chat, 'type', None) != enums.ChatType.PRIVATE:
+            # Проверяем, должны ли применяться ограничения (для ADMIN_GROUP с отключенными ограничениями не применяем множитель)
+            if should_apply_limits_to_admin(user_id=user_id, message=message):
+                mult = getattr(LimitsConfig, 'GROUP_MULTIPLIER', 1)
+                max_count = int(max_count * mult)
+    except Exception:
+        pass
+
+    # Для отрицательных индексов используем абсолютное значение разницы
+    if video_start_with < 0 and video_end_with < 0:
+        # Для отрицательных индексов: -1 до -100 = 100 элементов
+        count = abs(video_start_with) - abs(video_end_with) + 1
+    elif video_start_with > video_end_with:
+        # Для обратного порядка: считаем абсолютную разницу
+        count = abs(video_start_with - video_end_with) + 1
+    else:
+        # Для прямого порядка: обычная формула
+        count = video_end_with - video_start_with + 1
+    
+    if count is not None and count > max_count:
+        # Determine command type based on URL
+        if is_tiktok_url:
+            command_type = safe_get_messages(user_id).HELPER_COMMAND_TYPE_TIKTOK_MSG
+        elif is_instagram_url:
+            command_type = safe_get_messages(user_id).HELPER_COMMAND_TYPE_INSTAGRAM_MSG
+        else:
+            command_type = safe_get_messages(user_id).HELPER_COMMAND_TYPE_PLAYLIST_MSG
+        
+        # Create suggested commands with maximum available range
+        suggested_command_url_format = f"{url}*{video_start_with}*{video_start_with + max_count - 1}"
+        suggested_command_vid_format = f"/vid {video_start_with}-{video_start_with + max_count - 1} {url}"
+        suggested_command_audio_format = f"/audio {video_start_with}-{video_start_with + max_count - 1} {url}"
+        
+        safe_send_message(
+            message.chat.id,
+            safe_get_messages(user_id).HELPER_RANGE_LIMIT_EXCEEDED_MSG.format(service=service, count=count, max_count=max_count, suggested_command_url_format=suggested_command_url_format) +
+            f"<code>{suggested_command_vid_format}</code>\n\n"
+            f"<code>{suggested_command_audio_format}</code>",
+            parse_mode=enums.ParseMode.HTML,
+            reply_to_message_id=message.id
+        )
+        # We send a notification to the log channel
+        safe_send_message(
+            get_log_channel("general"),
+            safe_get_messages(user_id).HELPER_RANGE_LIMIT_EXCEEDED_LOG_MSG.format(service=service, count=count, max_count=max_count, user_id=message.chat.id),
+        )
+        return False
+    return True

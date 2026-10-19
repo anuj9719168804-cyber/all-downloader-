@@ -1,4 +1,4 @@
-# 🎬 Universal Video Downloader (tg-ytdlp-bot)
+# 🎬 Universal Video Downloader ❤️
 
 A Telegram bot that downloads videos, audio, and images from hundreds of websites and sends them straight to the chat. It is built on **Pyrogram (kurigram)** and **yt-dlp**, with **gallery-dl** for image galleries, **FFmpeg** for processing, and a **FastAPI web dashboard** for administration. The whole stack runs with Docker Compose.
 

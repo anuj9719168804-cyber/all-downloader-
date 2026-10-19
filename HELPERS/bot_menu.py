@@ -37,7 +37,14 @@ BOT_MENU_COMMANDS = [
     ("usage", "📈 Get all your logs"),
     ("nsfw", "🔞 Enable or disable NSFW blur"),
     ("args", "🧰 Change yt-dlp hook arguments"),
+    ("ban", "🚫 Ban a user: /ban <user_id>"),
+    ("unban", "✅ Unban a user: /unban <user_id>"),
+    ("broadcast", "📣 Send a message to all users"),
 ]
+
+
+def _to_bot_commands(pairs):
+    return [BotCommand(cmd, desc[:256]) for cmd, desc in pairs]
 
 
 def set_bot_menu(app) -> None:

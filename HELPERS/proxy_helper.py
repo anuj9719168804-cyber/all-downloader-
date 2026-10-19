@@ -233,6 +233,13 @@ def add_proxy_to_ytdl_opts(ytdl_opts: dict, url: str, user_id: int = None) -> di
     else:
         logger.info(f"No domain-specific proxy found for {url}")
     
+    # YouTube free-proxy mode (fbot's free pool): only active after a block/bot-check, only if no own proxy is set
+    try:
+        from HELPERS.free_proxy import apply_youtube_proxy
+        ytdl_opts = apply_youtube_proxy(ytdl_opts, url)
+    except Exception as _fp_err:
+        logger.debug(f"free proxy (youtube) skipped: {_fp_err}")
+    
     return ytdl_opts
 
 def try_with_proxy_fallback(ytdl_opts: dict, url: str, user_id: int = None, operation_func=None, *args, **kwargs):

@@ -1,41 +1,32 @@
 #!/bin/bash
 set -e
 
-# Переходим в рабочую директорию приложения
-cd /app || exit 1
-
-# Функция для обработки сигналов завершения
+# Cleanup handler for termination signals
 cleanup() {
-    echo "Получен сигнал завершения, останавливаем бота..."
-    kill $BOT_PID $HEALTH_PID 2>/dev/null || true
-    wait $BOT_PID 2>/dev/null || true
+    echo "Termination signal received, stopping processes..."
+    kill $BOT_PID $DASHBOARD_PID 2>/dev/null || true
+    wait $BOT_PID $DASHBOARD_PID 2>/dev/null || true
     exit 0
 }
 
-# Устанавливаем обработчики сигналов
+# Install signal handlers
 trap cleanup SIGTERM SIGINT
 
-# PO-token provider (bgutil) on 127.0.0.1:4416: started here, before the bot, so yt-dlp finds it with no env setup.
-if [ -f /opt/bgutil/server/build/main.js ]; then
-    (cd /opt/bgutil/server && node build/main.js > /tmp/bgutil.log 2>&1 &)
-    for i in $(seq 1 30); do
-        curl -s -o /dev/null http://127.0.0.1:4416/ && break
-        sleep 1
-    done
-    echo "PO token provider started on 127.0.0.1:4416 (log: /tmp/bgutil.log)"
-fi
+# Read dashboard port from config (default: 5555)
+DASHBOARD_PORT=$(python -c "from CONFIG.config import Config; print(getattr(Config, 'DASHBOARD_PORT', 5555))" 2>/dev/null || echo "5555")
 
-# Запускаем бота
-echo "Запуск Telegram бота из директории: $(pwd)"
+# Start the bot in background
+echo "Starting Telegram bot..."
 python magic.py &
 BOT_PID=$!
 
-echo "Бот запущен (PID: $BOT_PID)"
+# Start the dashboard in background
+echo "Starting dashboard on port ${DASHBOARD_PORT}..."
+python -m uvicorn web.dashboard_app:app --host 0.0.0.0 --port ${DASHBOARD_PORT} &
+DASHBOARD_PID=$!
 
-# Open the port Render requires ($PORT). Only returns "ok", serves no files.
-python scripts/health_server.py &
-HEALTH_PID=$!
-echo "Health endpoint started on port ${PORT:-8080} (PID: $HEALTH_PID)"
+echo "Bot and dashboard started"
+echo "Dashboard is available at http://localhost:${DASHBOARD_PORT}"
 
-# Ждем завершения процесса
-wait $BOT_PID
+# Wait for processes to exit
+wait $BOT_PID $DASHBOARD_PID

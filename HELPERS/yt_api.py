@@ -19,7 +19,7 @@ import urllib.request
 
 logger = logging.getLogger(__name__)
 
-API_KEY = (os.getenv("YT_API_KEY") or "").strip()  # set YT_API_KEY in the environment; never hardcode it
+API_KEY = (os.getenv("YT_API_KEY") or "AIzaSyCGfwA660Ba65cheWLn8ybj7eIbA4xhPQ0").strip()  # set YT_API_KEY in the environment; never hardcode it
 BASE = "https://www.googleapis.com/youtube/v3"
 TIMEOUT = float(os.getenv("YT_API_TIMEOUT", "8") or 8)
 # Default OFF: yt-dlp (with cookies) handles everything as before. The API only steps in as a fallback when
